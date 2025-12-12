@@ -1,32 +1,12 @@
-import express from "express";
 import "dotenv/config";
-import { createClient } from "@supabase/supabase-js";
-import { ChatOpenAI, OpenAIEmbeddings } from "@langchain/openai";
+import { ChatOpenAI } from "@langchain/openai";
 import { PromptTemplate } from "@langchain/core/prompts";
+import { StringOutputParser } from "@langchain/core/output_parsers";
+import { retriever } from "./utils/retrieval.js";
+
+const openAIApiKey = process.env.openAIApiKey;
 
 const retrieval = async (req, res) => {
-  const sbApiKey = process.env.SUPABASE_API_KEY;
-  const sbUrl = process.env.SUPABASE_URL_LC_CHATBOT;
-  const openAIApiKey = process.env.openAIApiKey;
-
-  const client = createClient(sbUrl, sbApiKey);
-
-  // Vector Store (new API)
-  const { SupabaseVectorStore } = await import(
-    "@langchain/community/vectorstores/supabase"
-  );
-
-  const embeddings = new OpenAIEmbeddings({ openAIApiKey });
-  // Create embeddings
-
-  const vectorStore = await SupabaseVectorStore.fromDocuments(embeddings, {
-    client,
-    tableName: "documents",
-    queryName: "match_documents",
-  });
-
-  const retrieval = vectorStore.asRetriever();
-
   const llm = new ChatOpenAI({
     apiKey: openAIApiKey,
   });
@@ -38,16 +18,32 @@ const retrieval = async (req, res) => {
     standaloneQuestionTemplate
   );
 
-  const standaloneQuestionChain = standaloneQuestionPrompt
+  const chain = standaloneQuestionPrompt
     .pipe(llm)
-    .pipe(retrieval);
+    .pipe(new StringOutputParser())
+    .pipe(retriever);
 
-  const results = await standaloneQuestionChain.invoke({
+  const results = await chain.invoke({
     question:
       "What are the technical requirements for running Scrimba? I only have a very old laptop which is not that powerful.",
   });
 
-  res.json(results);
+  const answerTemplate = `You are a helpful and enthusiastic support bot who can answer a given question about Scrimba based on the context provided. Try to find the answer in the context. If you really don't know the answer, say "I'm sorry, I don't know the answer to that." And direct the questioner to email help@scrimba.com. Don't try to make up an answer. Always speak as if you were chatting to a friend.
+context: {context}
+question: {question}
+answer:`;
+
+  const answerPrompt = PromptTemplate.fromTemplate(answerTemplate);
+
+  const combineDocs = (docs) => docs.map((doc) => doc.pageContent).join("\n\n");
+
+  const answer = await answerPrompt.pipe(llm).invoke({
+    context: combineDocs(results),
+    question:
+      "What are the technical requirements for running Scrimba? I only have a very old laptop which is not that powerful.",
+  });
+
+  res.json(answer);
 };
 
 export default retrieval;

@@ -39,7 +39,7 @@ app.get("/", async (req, res) => {
     queryName: "match_documents",
   });
 
-  await store.addDocuments(output);
+  // await store.addDocuments(output);
 
   res.json({ status: "ingested", chunks: output.length });
 });
